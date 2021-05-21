@@ -1,0 +1,5 @@
+script_dir= "example"
+
+[example1]
+EXAMPLE1_DIR="."
+EXAMPLE1_VALUE="applied"
