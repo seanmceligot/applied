@@ -4,5 +4,5 @@ pub enum Action {
     Apply,
     UnApply,
     IsApplied,
-    Usage
+    Usage,
 }
