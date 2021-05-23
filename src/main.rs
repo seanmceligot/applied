@@ -25,7 +25,21 @@ use applyerr::ApplyError;
 mod action;
 use action::Action;
 
+
 fn arguments<'a>() -> clap::ArgMatches<'a> {
+    
+    let action_apply = "apply";
+    let action_unapply = "unapply";
+    let action_show = "show";
+    let action_is_applied = "is_applied";
+
+    //let actions = vec![action_show, action_apply, action_unapply, action_is_applied];
+    let not_apply =vec![action_show, action_unapply, action_is_applied];
+    let not_unapply =vec![action_show, action_apply, action_is_applied];
+    let not_show =vec![ action_apply, action_unapply, action_is_applied];
+    let not_is_applied =vec![action_show, action_apply, action_unapply];
+    
+
     return App::new(crate_name!())
         .version(crate_version!())
         .author(crate_authors!())
@@ -40,33 +54,33 @@ fn arguments<'a>() -> clap::ArgMatches<'a> {
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("unapply")
+            Arg::with_name(action_unapply)
                 .short("u")
-                .long("unapply")
-                .conflicts_with("apply")
-                .conflicts_with("show"),
+                .long(action_unapply)
+                .conflicts_with_all(&not_unapply)
+                .help("call unapply script"),
         )
         .arg(
-            Arg::with_name("show")
-                .short("s")
-                .long("show")
-                .conflicts_with("apply")
-                .conflicts_with("unapply"),
+            Arg::with_name(action_show)
+                .help("call unapply script")
+                .long(action_show)
+                .conflicts_with_all(&not_show)
+                .help("show parameters")
         )
         .arg(
-            Arg::with_name("apply")
+            Arg::with_name(action_apply)
                 .short("a")
-                .long("apply")
-                .conflicts_with("unapply")
-                .conflicts_with("show"),
+                .long(action_apply)
+                .conflicts_with_all(&not_apply)
+                .help("call apply if not applied script")
         )
         .arg(
-            Arg::with_name("is_applied")
+            Arg::with_name(action_is_applied)
                 .short("i")
                 .long("is")
-                .conflicts_with("unapply")
-                .conflicts_with("apply")
-                .conflicts_with("show"),
+                .conflicts_with_all(&not_is_applied)
+                .help("return 0 if already applied")
+
         )
         .arg(
             Arg::with_name("v")
