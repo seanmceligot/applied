@@ -14,7 +14,7 @@ extern crate dirs;
 use config::Config;
 use failure::Error;
 use clap::{App, Arg};
-use std::{collections::HashMap, io::{self, Write}, path::PathBuf, process::Command, sync::atomic::AtomicBool};
+use std::{collections::HashMap, io::{self, Write}, path::PathBuf, process::Command};
 use ansi_term::Colour::{Green, Red, Yellow};
 mod applyerr;
 use applyerr::ApplyError;
@@ -181,9 +181,11 @@ fn execute_script(cmd: &PathBuf, vars: HashMap<String,String>) -> Result<(), App
 fn is_applied(_name: &str, script: &PathBuf, vars: HashMap<String,String>) -> bool {
 	match execute_script(script, vars) {
 		Ok(_) => {
+			println!("{}", Green.paint("Applied"));
 			true
 		},
 		Err(_e) => {
+			println!("{}", Yellow.paint("Unapplied"));
 			false
 		}
 	}
