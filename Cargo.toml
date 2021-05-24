@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 ansi_term = "*"
-clap = "*"
+seahorse = "*"
 config = "*"
 dirs = "*"
 dotenv = "*"
