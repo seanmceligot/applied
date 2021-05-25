@@ -1,3 +1,5 @@
-t:
-	cargo run -- --name example1 --apply
-	cargo run -- --name example1 --is
+a:
+	cargo run -- apply example1 
+
+i:
+	cargo run -- is-applied example1 
