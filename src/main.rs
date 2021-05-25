@@ -8,14 +8,20 @@ extern crate config;
 extern crate dirs;
 extern crate serde_derive;
 extern crate toml;
+extern crate tempfile;
 
 use ansi_term::Colour::{Green, Red, Yellow};
 use config::Config;
 use failure::Error;
-use std::{collections::HashMap, env, io::{self, Write}, path::PathBuf, process::Command};
+use std::{collections::HashMap, env, io::{self, Write}, path::{Path, PathBuf}, process::Command};
 mod applyerr;
 use applyerr::ApplyError;
 ///mod action;
+
+enum Script {
+    FsPath(PathBuf),
+    InMemory(String)
+}
 
 fn load_config(c1: &mut Config) -> Result<&mut Config, config::ConfigError> {
     let c2 = c1.merge(config::Environment::with_prefix("APPLY"))?;
@@ -28,11 +34,16 @@ fn main1() -> Result<(), Error> {
     let args: Vec<String> = env::args().collect();
 
     let apply_command = seahorse::Command::new("apply")
-    .description("apply  [name] if not applied")
+    .description("apply [name] if not already applied")
     .alias("a")
-    .usage("apply(a) [name...]");
+    .usage("apply(a) [name...]")
+    .action(apply_action);
 
-    println!("cmd {:?}", apply_command.name);
+    let is_applied_command = seahorse::Command::new("is_applied")
+    .description("is_applied [name] if not already applied")
+    .alias("i")
+    .usage("is_applied(i) [name...]")
+    .action(is_applied_action);
   
     let app = seahorse::App::new(env!("CARGO_PKG_NAME"))
     .description(env!("CARGO_PKG_DESCRIPTION"))
@@ -40,15 +51,13 @@ fn main1() -> Result<(), Error> {
     .version(env!("CARGO_PKG_VERSION"))
     .usage("applied action name")
     .action(apply_action)
-    .command(apply_command);
+    .command(apply_command)
+    .command(is_applied_command);
 
     app.run(args);
     
   
     Ok(())
-}
-fn help_action() {
-
 }
 fn get_script_directory(conf: &mut Config) -> PathBuf {
     let script_dir = match conf.get_str("script_dir") {
@@ -64,11 +73,12 @@ fn get_script_directory(conf: &mut Config) -> PathBuf {
 }
 #[test]
 fn test_appply() -> Result<(), Error> {
-    let c1 = &mut config::Config::default();
-    let conf = load_config(c1)?;
+    let apply_script = Script::InMemory(String::from("touch test1.tmp"));
+    let is_applied = Script::InMemory(String::from("test -f test1.tmp"));
+    let conf = &mut config::Config::default();
     let name = "example1";   
-    do_is_applied(conf, name)?;    
-    do_apply(conf, name)?;    
+    do_is_applied(conf, name)?;   
+    do_apply(conf,&apply_script, name)?;    
     Ok(())    
 }
 fn apply_action(c: &seahorse::Context) {
@@ -78,10 +88,19 @@ fn apply_action(c: &seahorse::Context) {
     let c1 = &mut config::Config::default();
     let conf = load_config(c1).unwrap();
     do_is_applied(conf, name).unwrap();    
-    do_apply(conf, name).unwrap();    
+    let apply_script = find_scriptlet(conf, name, "apply");
+    do_apply(conf, &apply_script, name).unwrap();    
 
 }
-fn find_scriptlet(conf: &mut Config, name: &str, action: &str) -> PathBuf {
+fn is_applied_action(c: &seahorse::Context) {
+    println!("is_applied_action");
+    let name: &str = c.args.first().unwrap();
+    debug!("is_applied_action {}", name);
+    let c1 = &mut config::Config::default();
+    let conf = load_config(c1).unwrap();
+    do_is_applied(conf, name).unwrap();
+}
+fn find_scriptlet(conf: &mut Config, name: &str, action: &str) -> Script {
     let filename = format!("{}-{}", name, action);
     debug!("script filename {}", filename);
     let dir = get_script_directory(conf);
@@ -92,21 +111,18 @@ fn find_scriptlet(conf: &mut Config, name: &str, action: &str) -> PathBuf {
         println!("create file {:?}", path);
     }
     println!("apply script {:?}", path);
-    path
+    Script::FsPath(path)
 }
-fn do_apply(conf: &mut Config, name: &str) -> Result<(), Error> {
-    let action = "apply";
-
-    let script_path = find_scriptlet(conf, name, action);
+fn do_apply(conf: &mut Config, script_path: &Script, name: &str) -> Result<(), Error> {
     
-    let maybe_name_config = conf.get_table(name)?;
+    let maybe_name_config: HashMap<String, config::Value> = conf.get_table(name)?;
     debug!("maybe_name_config {:#?}", maybe_name_config);
     let mut name_config: HashMap<String, String> = HashMap::new();
     for (k, v) in maybe_name_config {
         name_config.insert(k, v.into_str().unwrap());
     }
     debug!("params {:#?}", name_config);
-    execute_apply(name, &script_path, name_config);
+    execute_apply(name, script_path, name_config);
     Ok(())
 }
 
@@ -126,9 +142,8 @@ fn do_is_applied(conf: &mut Config, name: &str) -> Result<(), Error> {
     Ok(())
 }
 
-
-fn execute_script(cmd: &PathBuf, vars: HashMap<String, String>) -> Result<(), ApplyError> {
-    let cmdstr = cmd.as_os_str();
+fn execute_script_file(cmdpath: &Path,  vars: HashMap<String, String>) -> Result<(), ApplyError> {
+    let cmdstr = cmdpath.as_os_str();
     debug!("run: {:#?}", cmdstr);
     let output = Command::new(cmdstr)
         .envs(vars)
@@ -157,8 +172,21 @@ fn execute_script(cmd: &PathBuf, vars: HashMap<String, String>) -> Result<(), Ap
         }
         None => Err(ApplyError::CmdExitedPrematurely),
     }
+
 }
-fn execute_apply(_name: &str, script: &PathBuf, vars: HashMap<String, String>) -> bool {
+fn execute_script(script: &Script,  vars: HashMap<String, String>) -> Result<(), ApplyError> {
+    match script {
+        Script::FsPath(path) => execute_script_file(path,vars),
+        Script::InMemory(source) => {
+            let mut t = tempfile::NamedTempFile::new().unwrap();
+            t.write(source.as_bytes());
+            let r = execute_script_file(t.path(), vars);
+            t.close();
+            r
+        }
+    }
+}
+fn execute_apply(_name: &str, script: &Script, vars: HashMap<String, String>) -> bool {
     match execute_script(script, vars) {
         Ok(_) => {
             println!("{}", Green.paint("Applied"));
@@ -170,7 +198,7 @@ fn execute_apply(_name: &str, script: &PathBuf, vars: HashMap<String, String>) -
         }
     }
 }
-fn is_applied(_name: &str, script: &PathBuf, vars: HashMap<String, String>) -> bool {
+fn is_applied(_name: &str, script: &Script, vars: HashMap<String, String>) -> bool {
     match execute_script(script, vars) {
         Ok(_) => {
             println!("{}", Green.paint("Applied"));
