@@ -75,30 +75,40 @@ fn get_script_directory(conf: &mut Config) -> PathBuf {
 fn test_appply() -> Result<(), Error> {
     let apply_script = Script::InMemory(String::from("touch test1.tmp"));
     let is_applied = Script::InMemory(String::from("test -f test1.tmp"));
-    let conf = &mut config::Config::default();
     let name = "example1";   
-    do_is_applied(conf, name)?;   
-    do_apply(conf,&apply_script, name)?;    
+
+    let name_config : HashMap<String,String>  = HashMap::new(); 
+    do_is_applied(name_config.clone(), &is_applied, name)?; 
+    do_apply(name_config,&apply_script, name)?;    
     Ok(())    
 }
 fn apply_action(c: &seahorse::Context) {
     println!("apply_action");
     let name: &str = c.args.first().unwrap();
     debug!("apply_action {}", name);
+
     let c1 = &mut config::Config::default();
     let conf = load_config(c1).unwrap();
-    do_is_applied(conf, name).unwrap();    
+
+    let name_config: HashMap<String, String> = scriptlet_config(conf, name).expect("scriptlet_config");
+    let is_applied_script = find_scriptlet(conf, name, "is-applied");
+    do_is_applied(name_config.clone(), &is_applied_script, name).unwrap();    
     let apply_script = find_scriptlet(conf, name, "apply");
-    do_apply(conf, &apply_script, name).unwrap();    
+    do_apply(name_config, &apply_script, name).unwrap();    
 
 }
 fn is_applied_action(c: &seahorse::Context) {
     println!("is_applied_action");
     let name: &str = c.args.first().unwrap();
     debug!("is_applied_action {}", name);
+    
     let c1 = &mut config::Config::default();
     let conf = load_config(c1).unwrap();
-    do_is_applied(conf, name).unwrap();
+    let name_config: HashMap<String, String> = scriptlet_config(conf, name).expect("scriptlet_config");
+
+    let is_applied_script = find_scriptlet(conf, name, "is-applied");
+
+    do_is_applied(name_config, &is_applied_script, name).unwrap();
 }
 fn find_scriptlet(conf: &mut Config, name: &str, action: &str) -> Script {
     let filename = format!("{}-{}", name, action);
@@ -113,39 +123,34 @@ fn find_scriptlet(conf: &mut Config, name: &str, action: &str) -> Script {
     println!("apply script {:?}", path);
     Script::FsPath(path)
 }
-fn do_apply(conf: &mut Config, script_path: &Script, name: &str) -> Result<(), Error> {
+fn do_apply(name_config: HashMap<String,String>, script_path: &Script, name: &str) -> Result<(), Error> {
     
+    debug!("params {:#?}", name_config);
+    execute_apply(name, script_path, name_config);
+    Ok(())
+}
+
+fn do_is_applied(name_config: HashMap<String,String>, script_path: &Script, name: &str) -> Result<(), Error> {
+    debug!("params {:#?}", name_config);
+    is_applied(name, &script_path, name_config);
+    Ok(())
+}
+fn scriptlet_config(conf: &mut Config, name: &str) -> Result<HashMap<String, String>, Error> {
     let maybe_name_config: HashMap<String, config::Value> = conf.get_table(name)?;
     debug!("maybe_name_config {:#?}", maybe_name_config);
     let mut name_config: HashMap<String, String> = HashMap::new();
     for (k, v) in maybe_name_config {
         name_config.insert(k, v.into_str().unwrap());
     }
-    debug!("params {:#?}", name_config);
-    execute_apply(name, script_path, name_config);
-    Ok(())
+    Ok(name_config)
 }
 
-fn do_is_applied(conf: &mut Config, name: &str) -> Result<(), Error> {
-    let action = "is-applied";
-
-    let script_path = find_scriptlet(conf, name, action);
-
-    let maybe_name_config = conf.get_table(name)?;
-    debug!("maybe_name_config {:#?}", maybe_name_config);
-    let mut name_config: HashMap<String, String> = HashMap::new();
-    for (k, v) in maybe_name_config {
-        name_config.insert(k, v.into_str().unwrap());
-    }
-    debug!("params {:#?}", name_config);
-    is_applied(name, &script_path, name_config);
-    Ok(())
-}
 
 fn execute_script_file(cmdpath: &Path,  vars: HashMap<String, String>) -> Result<(), ApplyError> {
     let cmdstr = cmdpath.as_os_str();
     debug!("run: {:#?}", cmdstr);
-    let output = Command::new(cmdstr)
+    let output = Command::new("bash")
+        .arg(cmdstr)
         .envs(vars)
         .output()
         .expect("cmd failed");
@@ -179,9 +184,10 @@ fn execute_script(script: &Script,  vars: HashMap<String, String>) -> Result<(),
         Script::FsPath(path) => execute_script_file(path,vars),
         Script::InMemory(source) => {
             let mut t = tempfile::NamedTempFile::new().unwrap();
-            t.write(source.as_bytes());
+            t.write(source.as_bytes()).unwrap();
+            debug!("execute {:?}", t.path());
             let r = execute_script_file(t.path(), vars);
-            t.close();
+            t.close().unwrap();
             r
         }
     }
